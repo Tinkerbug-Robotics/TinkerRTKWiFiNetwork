@@ -28,13 +28,16 @@ const char home_html[] PROGMEM = R"rawliteral(
     <div class="cards">
 
       <div class="card">
-        <p><i class="fas fa-globe" style="color:#0B67EC;"></i> MODE</p><p>Base</p>
+        <p><i class="fa-solid fa-bolt" style="color:#FFA533;"></i> TINKERCHARGE</p><p><a href='/tinkercharge'> TinkerCharge</a></p>
       </div>
       <div class="card">
-        <p><i class="fas fa-satellite" style="color:#1EC80D;"></i> RTK</p><p><a href='/rtk'> RTK</a></p>
+        <p><i class="fa-solid fa-satellite-dish" style="color:#1EC80D;"></i> RTK</p><p><a href='/rtk'> RTK</a></p>
       </div>
       <div class="card">
-        <p><i class="fas fa-bolt" style="color:#FFA533;"></i> TINKERCHARGE</p><p><a href='/tinkercharge'> TinkerCharge</a></p>
+        <p><i class="fa-solid fa-earth-americas" style="color:#0B67EC;"></i> GNSS</p><p><a href='/gnss'> GNSS</a></p>
+      </div>
+      <div class="card">
+        <p><i class="fas fa-globe" style="color:#0B67EC;"></i> MAP VIEW</p><p><a href='/map'> Map</a></p>
       </div>
       
     </div>
