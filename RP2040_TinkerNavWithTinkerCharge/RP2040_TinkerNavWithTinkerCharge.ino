@@ -96,11 +96,11 @@ void loop()
         last_soc_time = current_time;
     }
 
-//    // Print GNSS output to USB serial
-//    while (Serial1.available()) 
-//    {
-//        //Serial.print(Serial1.read(),HEX);
-//    }
+    // Print GNSS output to USB serial
+    while (Serial1.available()) 
+    {
+        Serial.print(Serial1.read(),HEX);
+    }
 
 }
 
