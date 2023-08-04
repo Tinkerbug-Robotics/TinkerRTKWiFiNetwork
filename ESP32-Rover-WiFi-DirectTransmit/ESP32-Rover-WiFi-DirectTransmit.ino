@@ -56,7 +56,7 @@ SoftwareSerial tinkernav_serial;
 
 // GNSS parsing
 String gps_quality_text = "";
-int rtk_age = 0;
+float rtk_age = 0.0;
 int num_cycle_slip_gps = 0;
 int num_cycle_slip_bds = 0;
 int num_cycle_slip_gal = 0;
@@ -64,7 +64,7 @@ float rtk_east = 0.0;
 float rtk_north = 0.0;
 float rtk_up = 0.0;
 String rtk_rec_mode = "Rover";
-int rtk_ratio = 0;
+float rtk_ratio = 0.0;
 float lattitude = 0.0;
 float longitude = 0.0;
 String date_string = "";
@@ -596,8 +596,8 @@ void readAndParseGNSS()
         if(strcmp(psti_1.value(),"030") == 0)
         {
             // Age of correction data if present
-            rtk_age = atoi(psti_14.value());
-            rtk_ratio = atoi(psti_15.value());
+            rtk_age = atof(psti_14.value());
+            rtk_ratio = atof(psti_15.value());
         }
         else if (strcmp(psti_1.value(),"032") == 0)
         {
