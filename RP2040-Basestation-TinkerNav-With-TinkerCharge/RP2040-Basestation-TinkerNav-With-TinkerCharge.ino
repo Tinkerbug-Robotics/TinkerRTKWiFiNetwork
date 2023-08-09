@@ -74,6 +74,9 @@ void setup()
     uint8_t factory_defaults[] = {0xA0, 0xA1, 0x00, 0x02, 0x04, 0x01, 0x05, 0x0D, 0x0A};
     int msg_size = sizeof(factory_defaults);
     sendMessage(factory_defaults,msg_size);
+    // Restart serial with factory default baud rate
+    Serial1.end();
+    Serial1.begin(115200);
     
     delay(500);
     // RTK base mode settings for base station
@@ -86,7 +89,7 @@ void setup()
                                        0x00, 0xA5, 0x0D, 0x0A};
     msg_size = sizeof(base_station_rtk_mode);
     sendMessage(base_station_rtk_mode,msg_size);
-        Serial.print("Receiving back ");
+    Serial.print("Receiving back ");
     int time_since_last_recv = millis();
     while (Serial1.available () || millis() < time_since_last_recv + 500)
     {
