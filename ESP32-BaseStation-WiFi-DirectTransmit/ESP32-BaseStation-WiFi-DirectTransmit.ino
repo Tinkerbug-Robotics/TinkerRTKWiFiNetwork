@@ -228,13 +228,15 @@ void loop()
     // Set indicator based on status of lat/long report
     if (data_available)
     {
-
+        data_available = false;
+    
         rtcm_parser.ReadData(rtcm_data,data_length);
 
         static double ecef_rss_last = 0;
         double ecef_rss = sqrt(rtcm_parser.data_struct.ecef[0]*rtcm_parser.data_struct.ecef[0] +
                                rtcm_parser.data_struct.ecef[1]*rtcm_parser.data_struct.ecef[1] +
                                rtcm_parser.data_struct.ecef[2]*rtcm_parser.data_struct.ecef[2]);
+        Serial.print("ECEF RSS = ");Serial.println(ecef_rss);
 
         // Latitude and Longitude reported and did not vary since last report
         if(ecef_rss > 1 && fabs(ecef_rss_last-ecef_rss) < 0.001)
@@ -352,8 +354,8 @@ void readSerialBufferAndSend()
 
         remote_client.write((uint8_t*)rtcm_data,data_counter);
         Serial.print(millis());Serial.print(" Sent RTCM data length ");Serial.println(data_counter);
-        data_available = false;
-        num_rtcm_uploads += 1;       
+        num_rtcm_uploads += 1;
+        data_length = data_counter;
         data_counter = 0;
     }
 }
