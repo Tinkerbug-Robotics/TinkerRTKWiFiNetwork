@@ -75,6 +75,10 @@ void setup()
     int msg_size = sizeof(factory_defaults);
     sendMessage(factory_defaults,msg_size);
 
+    // Restart serial with factory default baud rate
+    Serial1.end();
+    Serial1.begin(115200);
+
     // ESP32 serial connection
     swSerial.begin(9600);
     radioTransfer.begin(swSerial);
