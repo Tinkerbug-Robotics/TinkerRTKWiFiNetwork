@@ -18,6 +18,9 @@
 #include <SoftwareSerial.h>
 #include "pico/stdlib.h"
 #include <MAX17055_TR.h>
+#include "programSkyTraq.h"
+
+programSkyTraq program_skytraq;
 
 // Serial connection to ESP32 radio (RX, TX)
 SoftwareSerial swSerial(20, 3);
@@ -58,27 +61,22 @@ void setup()
     // or it will pause indefinetly
     //while (!Serial){};
 
+    // Initialze library to program SkyTraq
+    program_skytraq.init(Serial1);
+
     // GNSS input/output Serial is Serial1 using default 0,1 (TX, RX) pins
     // Loop through valid baud rates and determine the current setting
     // Set Serial1 to the detected baud rate, stop if a baud rate is not found
     // From NavSpark binary protocol. Search for "SkyTrq Application Note AN0037"
     // Currently available at: https://www.navsparkforum.com.tw/download/file.php?id=1162&sid=dc2418f065ec011e1b27cfa77bf22b19
-    if(!detectCurrentBaudRate())
+    if(!autoSetBaudRate())
     {
         Serial.println("No valid baud rate found to talk to receiver, stopping");
         while(1);
     }
     
     delay(250);
-    // Reset receiver to factory defaults, which are the Rover settings
-    uint8_t factory_defaults[] = {0xA0, 0xA1, 0x00, 0x02, 0x04, 0x01, 0x05, 0x0D, 0x0A};
-    int msg_size = sizeof(factory_defaults);
-    sendMessage(factory_defaults,msg_size);
-
-    // Restart serial with factory default baud rate
-    Serial1.end();
-    Serial1.begin(115200);
-
+    
     // ESP32 serial connection
     swSerial.begin(9600);
     radioTransfer.begin(swSerial);
@@ -155,89 +153,49 @@ void readAndSendSOC()
 
 }
 
-// Loop through valid baud rates and determine the current setting
-bool detectCurrentBaudRate()
+// Loop through valid baud rates for the GNSS receiver and determine the current setting
+bool autoSetBaudRate()
 {
     // Start serial connections to send correction data to GNSS receiver
     // This loop will detect the current baud rate of the GNSS receiver
     // by sending a message and determining which buad rate returns a valid
     // ACK message
-    int valid_baud_rates[9] = {4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600}; 
-    
-    // A character array for one block of GNSS data
-    uint8_t serial_data[2500];
+    int valid_baud_rates[9] = {4800, 9600, 19200, 38400, 57600, 115200, 
+                               230400, 460800, 921600};
 
-    // How long to wait for response from receiver
-    int wait_duration = 250;
+    // Message to reset receiver to defaults
+    uint8_t res_payload_length[]={0x00, 0x02};
+    int res_payload_length_length = 2;
+    uint8_t res_msg_id[]={0x04};
+    int res_msg_id_length = 1;
+    uint8_t res_msg_body[]={0x01};
+    int res_msg_body_length = 1;
 
     // Loop through possible baud rates
     for (int i=0;i<9;i++)
     {
         // Open the serial connection to the receiver
         Serial1.begin(valid_baud_rates[i]);
-        
-        // Send a message to request the software version and check if a valid
-        // ACK message is received
-        uint8_t msg_send[] = {0xA0, 0xA1, 0x00, 0x02, 0x04, 0x01, 0x05, 0x0D, 0x0A};
-        Serial.print("Trying baud rate = ");Serial.println(valid_baud_rates[i]);
-        int msg_size = sizeof(msg_send);
 
-        sendMessage(msg_send, msg_size);
-        
-        unsigned long time_start = millis();
-        int input_pos = 0;
-        bool baud_rate_found = false;
-        
-        // Wait for a response from the receiver
-        while (millis() < time_start + wait_duration && !baud_rate_found)
+        // Send a message to reset receiver to defaults
+        if (program_skytraq.sendGenericMsg(res_msg_id,
+                                           res_msg_id_length,
+                                           res_payload_length,
+                                           res_payload_length_length,
+                                           res_msg_body,
+                                           res_msg_body_length) == 1)
         {
-            //Serial.println(millis());
-            if (Serial1.available() && !baud_rate_found)
-            {
-                // Read data from serial
-                serial_data[input_pos] = Serial1.read();
-                //Serial.print(serial_data[input_pos], HEX);Serial.print(" ");
-
-                // Start checking last 5 bytes found for a valid ACK message
-                if (input_pos >=4)
-                {
-                    // Valid message was received, we have the right baud rate
-                    if (serial_data[input_pos-4] == 0xA0 &&
-                        serial_data[input_pos-3] == 0xA1 &&
-                        serial_data[input_pos-2] == 0x0 &&
-                        serial_data[input_pos-1] == 0x2 &&
-                        serial_data[input_pos] == 0x83)
-                    {
-                        baud_rate_found = true;                    
-                    }
-                }
-                
-                input_pos++;
-            }
-        }
-
-        if (baud_rate_found)
-        {
-            Serial.print("Found correct baud rate of ");Serial.println(valid_baud_rates[i]);
-            return true;
-        }
+            Serial.print("Found correct baud rate of ");
+            Serial.print(valid_baud_rates[i]);
+            Serial.println(" for GNSS receiver");
+            return true;            
+        }               
         else
         {
             Serial1.end();
-            input_pos = 0;
         }
     }
 
     return false;
 }
 
-void sendMessage(uint8_t *msg_send, int msg_size)
-{
-    Serial1.write(msg_send,msg_size);
-    Serial.print("Sending ");Serial.print(" ");
-    for (int i=0;i<msg_size;i++)
-    {
-        Serial.print(msg_send[i],HEX);Serial.print(" ");
-    }
-    Serial.println("");
-}
