@@ -1,3 +1,23 @@
+/**********************************************************************
+*
+* Copyright (c) 2023 Tinkerbug Robotics
+*
+* This program is free software: you can redistribute it and/or modify it under the terms
+* of the GNU General Public License as published by the Free Software Foundation, either
+* version 3 of the License, or (at your option) any later version.
+* 
+* This program is distributed in the hope that it will be useful, but WITHOUT ANY
+* WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A 
+* PARTICULAR PURPOSE. See the GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License along with this 
+* program. If not, see <https://www.gnu.org/licenses/>.
+* 
+* Authors: 
+* Christian Pedersen; tinkerbug@tinkerbugrobotics.com
+* 
+**********************************************************************/
+
 /**
  * Firmware for ESP32 running on the base station to send correction data directly to rover over WiFi network.
  * This firmware connects to a WiFi network (modify inputs.h for your settings) and creates a TCP server, 
@@ -7,19 +27,19 @@
  * means that the fix has not changed since the last update.
  * This firmware also displays basic information the information sent and battery if attched,
  * which is available on the ESP32's IP address (printed to serial at startup).
- * Copyright Tinkerbug Robotics 2023
- * Provided under GNU GPL 3.0 License
  */
  
  // Libraries
 #include <WiFi.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
-#include "SoftwareSerial.h"
-#include "SerialTransfer.h"
-#include "ParseRTCM.h"
+#include <SoftwareSerial.h>
+#include <SerialTransfer.h>
 #include <Adafruit_NeoPixel.h>
 #include <esp_task_wdt.h>
+
+#include "ParseRTCM.h"
+#include "programSkyTraq.h"
 
 // Local files
 #include "inputs.h"
@@ -28,6 +48,8 @@
 #include "rtk.h"
 #include "map.h"
 #include "gnss.h"
+
+programSkyTraq program_skytraq;
 
 // ESP32 watch dog timer (s)
 #define WDT_TIMEOUT 10
@@ -123,6 +145,42 @@ void setup()
     // GNSS hardware serial connection (rx/tx)
     // Receives RTCM correction data from the PX1125R
     Serial1.begin(115200, SERIAL_8N1, 21, 20);
+
+    // Initialze library to program SkyTraq
+    program_skytraq.init(Serial1);
+
+    // Detect and set the correct baudrate for the GNSS receiver.
+    // This also resets the PX100 series reciever to the factory default
+    // settings. No additional settings are required for the rover.
+    if(!autoSetBaudRate())
+    {
+        Serial.println("No valid baud rate found to talk to receiver, stopping");
+        while(1);
+    }
+
+    // Message to set mode to RTK base with survey in
+    // Note this message is not documented in the NavSpark binary protocol 
+    // documentation it was found by copying the message sent by the by the
+    // SkyTraq GNSS viewer when configuring the receiver
+    uint8_t payload_length[]={0x00, 0x25};
+    int payload_length_length = 2;
+    uint8_t msg_id[]={0x6A, 0x06};
+    int msg_id_length = 2;
+    uint8_t msg_body[]={0x01, 0x01, 0x00, 0x00, 0x00, 
+                        0x3C, 0x00, 0x00, 0x00, 0x1E,
+                        0x00, 0x00, 0x00, 0x00, 0x00,  
+                        0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x01};
+    int msg_body_length = 35;
+    program_skytraq.sendGenericMsg(msg_id,
+                                   msg_id_length,
+                                   payload_length,
+                                   payload_length_length,
+                                   msg_body,
+                                   msg_body_length);
+    delay(250);
 
     // Connect to WiFi
     Serial.print("Connecting to WiFi .");
@@ -449,4 +507,50 @@ String initLocation(const String& var)
     }
 
     return String();
+}
+
+// Loop through valid baud rates for the GNSS receiver and determine the current setting
+bool autoSetBaudRate()
+{
+    // Start serial connections to send correction data to GNSS receiver
+    // This loop will detect the current baud rate of the GNSS receiver
+    // by sending a message and determining which buad rate returns a valid
+    // ACK message
+    int valid_baud_rates[9] = {4800, 9600, 19200, 38400, 57600, 115200, 
+                               230400, 460800, 921600};
+
+    // Message to reset receiver to defaults
+    uint8_t res_payload_length[]={0x00, 0x02};
+    int res_payload_length_length = 2;
+    uint8_t res_msg_id[]={0x04};
+    int res_msg_id_length = 1;
+    uint8_t res_msg_body[]={0x01};
+    int res_msg_body_length = 1;
+
+    // Loop through possible baud rates
+    for (int i=0;i<9;i++)
+    {
+        // Open the serial connection to the receiver
+        Serial1.begin(valid_baud_rates[i]);
+
+        // Send a message to reset receiver to defaults
+        if (program_skytraq.sendGenericMsg(res_msg_id,
+                                           res_msg_id_length,
+                                           res_payload_length,
+                                           res_payload_length_length,
+                                           res_msg_body,
+                                           res_msg_body_length) == 1)
+        {
+            Serial.print("Found correct baud rate of ");
+            Serial.print(valid_baud_rates[i]);
+            Serial.println(" for GNSS receiver");
+            return true;            
+        }               
+        else
+        {
+            Serial1.end();
+        }
+    }
+
+    return false;
 }
