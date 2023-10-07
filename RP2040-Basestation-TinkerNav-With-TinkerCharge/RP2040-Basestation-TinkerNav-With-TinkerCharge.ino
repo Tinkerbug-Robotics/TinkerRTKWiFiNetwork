@@ -18,9 +18,15 @@
 #include <SoftwareSerial.h>
 #include "pico/stdlib.h"
 #include <MAX17055_TR.h>
+#include "programSkyTraq.h"
+
+// ESP32 watch dog timer (s)
+#define WDT_TIMEOUT 10
 
 // Serial connection to ESP32 radio (RX, TX)
 SoftwareSerial swSerial(20, 3);
+
+programSkyTraq program_skytraq;
 
 // Library and structure for transfering data to TinkerSend radio
 SerialTransfer radioTransfer;
@@ -52,54 +58,58 @@ int soc_periodic = 2000;
 void setup() 
 {
 
+    // Start a watchdog timer which resets the RP2040 if it is not reset 
+    // within the milliseconds submitted as an argument
+    rp2040.wdt_begin(8000);
+
     // Pico USB Serial
     Serial.begin(115200);
     // Pauses till serial starts. Do not use when running without a computer attached
     // or it will pause indefinetly
     //while (!Serial){};
 
+    // Serial connection to GNSS receiver
+    // Use default 0,1 pins
+    Serial1.begin(115200);
+    
+    // Initialze library to program SkyTraq
+    program_skytraq.init(Serial1);
+
     // GNSS input/output Serial is Serial1 using default 0,1 (TX, RX) pins
     // Loop through valid baud rates and determine the current setting
     // Set Serial1 to the detected baud rate, stop if a baud rate is not found
     // From NavSpark binary protocol. Search for "SkyTrq Application Note AN0037"
     // Currently available at: https://www.navsparkforum.com.tw/download/file.php?id=1162&sid=dc2418f065ec011e1b27cfa77bf22b19
-    if(!detectCurrentBaudRate())
+    if(!autoSetBaudRate())
     {
         Serial.println("No valid baud rate found to talk to receiver, stopping");
         while(1);
     }
     
-    delay(250);
-    // Reset receiver to factory defaults
-    uint8_t factory_defaults[] = {0xA0, 0xA1, 0x00, 0x02, 0x04, 0x01, 0x05, 0x0D, 0x0A};
-    int msg_size = sizeof(factory_defaults);
-    sendMessage(factory_defaults,msg_size);
-    // Restart serial with factory default baud rate
-    Serial1.end();
-    Serial1.begin(115200);
-    
     delay(500);
-    // RTK base mode settings for base station
-    // 2000 second Survey Length
-    // 30 m Standard Deviation
-    uint8_t base_station_rtk_mode[] = {0xA0, 0xA1, 0x00, 0x25, 0x6A, 0x06, 0x01, 0x01, 0x00, 0x00, 
-                                       0x07, 0xD0, 0x00, 0x00, 0x00, 0x1E, 0x00, 0x00, 0x00, 0x00, 
-                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-                                       0x00, 0xA5, 0x0D, 0x0A};
-    msg_size = sizeof(base_station_rtk_mode);
-    sendMessage(base_station_rtk_mode,msg_size);
-    Serial.print("Receiving back ");
-    int time_since_last_recv = millis();
-    while (Serial1.available () || millis() < time_since_last_recv + 500)
-    {
-        if (Serial1.available())
-        {
-            // Read data from serial
-            Serial.write(Serial1.read());//Serial.print(" ");
-            time_since_last_recv = millis();
-        }
-    }
+
+    // Message to set mode to RTK base with survey in
+    // Note this message is not documented in the NavSpark binary protocol 
+    // documentation it was found by copying the message sent by the by the
+    // SkyTraq GNSS viewer when configuring the receiver
+    uint8_t payload_length[]={0x00, 0x25};
+    int payload_length_length = 2;
+    uint8_t msg_id[]={0x6A, 0x06};
+    int msg_id_length = 2;
+    uint8_t msg_body[]={0x01, 0x01, 0x00, 0x00, 0x00, 
+                        0x3C, 0x00, 0x00, 0x00, 0x1E,
+                        0x00, 0x00, 0x00, 0x00, 0x00,  
+                        0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x01};
+    int msg_body_length = 35;
+    program_skytraq.sendGenericMsg(msg_id,
+                                   msg_id_length,
+                                   payload_length,
+                                   payload_length_length,
+                                   msg_body,
+                                   msg_body_length);
     delay(250);
     
     // ESP32 serial connection
@@ -125,6 +135,9 @@ void setup()
 
 void loop() 
 {
+
+    // Reset watchdog timer
+    rp2040.wdt_reset();
 
     unsigned long current_time = millis();
 
@@ -179,7 +192,7 @@ void readAndSendSOC()
 }
 
 // Loop through valid baud rates and determine the current setting
-bool detectCurrentBaudRate()
+bool autoSetBaudRate()
 {
     // Start serial connections to send correction data to GNSS receiver
     // This loop will detect the current baud rate of the GNSS receiver
@@ -193,74 +206,37 @@ bool detectCurrentBaudRate()
     // How long to wait for response from receiver
     int wait_duration = 250;
 
+    // Message to reset receiver to defaults
+    uint8_t res_payload_length[]={0x00, 0x02};
+    int res_payload_length_length = 2;
+    uint8_t res_msg_id[]={0x04};
+    int res_msg_id_length = 1;
+    uint8_t res_msg_body[]={0x01};
+    int res_msg_body_length = 1;
+
     // Loop through possible baud rates
     for (int i=0;i<9;i++)
     {
         // Open the serial connection to the receiver
         Serial1.begin(valid_baud_rates[i]);
-        
-        // Send a message to request the software version and check if a valid
-        // ACK message is received
-        uint8_t msg_send[] = {0xA0, 0xA1, 0x00, 0x02, 0x04, 0x01, 0x05, 0x0D, 0x0A};
+
         Serial.print("Trying baud rate = ");Serial.println(valid_baud_rates[i]);
-        int msg_size = sizeof(msg_send);
-
-        sendMessage(msg_send, msg_size);
-        
-        unsigned long time_start = millis();
-        int input_pos = 0;
-        bool baud_rate_found = false;
-        
-        // Wait for a response from the receiver
-        while (millis() < time_start + wait_duration && !baud_rate_found)
-        {
-            //Serial.println(millis());
-            if (Serial1.available() && !baud_rate_found)
-            {
-                // Read data from serial
-                serial_data[input_pos] = Serial1.read();
-                //Serial.print(serial_data[input_pos], HEX);Serial.print(" ");
-
-                // Start checking last 5 bytes found for a valid ACK message
-                if (input_pos >=4)
-                {
-                    // Valid message was received, we have the right baud rate
-                    if (serial_data[input_pos-4] == 0xA0 &&
-                        serial_data[input_pos-3] == 0xA1 &&
-                        serial_data[input_pos-2] == 0x0 &&
-                        serial_data[input_pos-1] == 0x2 &&
-                        serial_data[input_pos] == 0x83)
-                    {
-                        baud_rate_found = true;                    
-                    }
-                }
-                
-                input_pos++;
-            }
-        }
-
-        if (baud_rate_found)
+        // Send a message to reset receiver to defaults
+        if (program_skytraq.sendGenericMsg(res_msg_id,
+                                           res_msg_id_length,
+                                           res_payload_length,
+                                           res_payload_length_length,
+                                           res_msg_body,
+                                           res_msg_body_length) == 1)
         {
             Serial.print("Found correct baud rate of ");Serial.println(valid_baud_rates[i]);
-            return true;
-        }
+            return true;            
+        }               
         else
         {
             Serial1.end();
-            input_pos = 0;
         }
     }
 
     return false;
-}
-
-void sendMessage(uint8_t *msg_send, int msg_size)
-{
-    Serial1.write(msg_send,msg_size);
-    Serial.print("Sending ");Serial.print(" ");
-    for (int i=0;i<msg_size;i++)
-    {
-        Serial.print(msg_send[i],HEX);Serial.print(" ");
-    }
-    Serial.println("");
 }
